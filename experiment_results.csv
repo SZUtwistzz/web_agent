@@ -1,0 +1,3 @@
+task_name,success,steps_taken,total_tokens,total_latency
+Baidu Search,True,2,7758,12.26314091682434
+Wiki Search,True,2,17152,9.79075813293457
