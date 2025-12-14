@@ -91,7 +91,7 @@ def execute_task(task, browser_context):
             pass
 
         html = page.content()
-        decision, tokens, latency, _ = get_ai_decision(task['goal'], html, last_action_desc)
+        decision, tokens, latency, _ = get_ai_decision(task['goal'], page, html, last_action_desc)
         
         task_data['total_tokens'] += tokens
         task_data['total_latency'] += latency
