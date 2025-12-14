@@ -1,3 +1,4 @@
 task_name,success,steps_taken,total_tokens,total_latency
-Baidu Search,True,2,7758,12.26314091682434
-Wiki Search,True,2,17152,9.79075813293457
+Shopping Demo (Login & Add Cart),True,3,2571,19.534069061279297
+Douban Movie Search,False,6,32514,31.158217668533325
+Baidu Search,True,2,7743,12.687791347503662

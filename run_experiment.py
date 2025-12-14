@@ -5,28 +5,39 @@ from playwright.sync_api import sync_playwright
 from agent import get_ai_decision
 from config import HEADLESS_MODE, RESULT_FILE, ACTION_TIMEOUT
 
+# === 🔥 升级版复杂任务集 ===
 EXPERIMENT_TASKS = [
     {
         "id": 1,
-        "name": "Baidu Search",
-        "url": "https://www.baidu.com",
-        "goal": "在搜索框输入 'DeepSeek'，然后按回车搜索", # 提示改得更明确
-        "max_steps": 5
+        "name": "Shopping Demo (Login & Add Cart)",
+        "url": "https://www.saucedemo.com/",
+        # 这个任务非常长，考验 Agent 的连续逻辑能力
+        "goal": "1. 登录(用户名: standard_user, 密码: secret_sauce). 2. 找到 'Sauce Labs Backpack' 并点击 'Add to cart'. 3. 点击右上角的购物车图标.",
+        "max_steps": 8 # 步骤给多一点
     },
     {
         "id": 2,
-        "name": "Wiki Search",
-        "url": "https://en.wikipedia.org/wiki/Main_Page",
-        "goal": "在右上角搜索框输入 'AI' 并按回车",
-        "max_steps": 5
+        "name": "Douban Movie Search",
+        "url": "https://movie.douban.com/",
+        "goal": "在搜索框输入 '肖申克的救赎' 并回车。在结果页中点击第一个电影标题(通常是带有海报的那个)。",
+        "max_steps": 6
+    },
+    # 保留一个简单的做对比
+    {
+        "id": 3,
+        "name": "Baidu Search",
+        "url": "https://www.baidu.com",
+        "goal": "在搜索框输入 'DeepSeek'，然后按回车", 
+        "max_steps": 4
     }
 ]
 
-# === 核心 JS：注入ID + 同步Input值 ===
+# JS 注入逻辑保持不变
 INJECT_JS = """
 () => {
     let id_counter = 0;
-    const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"]');
+    const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], .inventory_item_name'); 
+    // .inventory_item_name 是专门为 SauceDemo 加的，方便 AI 识别商品名
     
     elements.forEach(el => {
         const rect = el.getBoundingClientRect();
@@ -35,7 +46,6 @@ INJECT_JS = """
             
             el.setAttribute('data-agent-id', id_counter.toString());
             
-            // 关键：把当前输入框的值显式写到 HTML 属性里，这样 Python 才能读到
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                 el.setAttribute('value', el.value);
             }
@@ -69,7 +79,6 @@ def execute_task(task, browser_context):
         "total_latency": 0
     }
     
-    # 记录上一步的操作，传给 AI
     last_action_desc = "None (Start)"
 
     for step in range(task['max_steps']):
@@ -82,7 +91,6 @@ def execute_task(task, browser_context):
             pass
 
         html = page.content()
-        # 传入 last_action_desc
         decision, tokens, latency, _ = get_ai_decision(task['goal'], html, last_action_desc)
         
         task_data['total_tokens'] += tokens
@@ -93,9 +101,7 @@ def execute_task(task, browser_context):
         val = decision.get('value')
         
         print(f" 🤖 决策: {action} | ID: {target_id} | Val: {val}")
-        
-        # 更新记忆
-        last_action_desc = f"{action} on ID {target_id} with value '{val}'"
+        last_action_desc = f"{action} {target_id} val={val}"
         
         if action == "finish":
             print("  ✅ 任务完成")
@@ -103,11 +109,18 @@ def execute_task(task, browser_context):
             break
             
         try:
-            # === 新增：键盘操作 (回车) ===
-            if action == "key":
-                # 按键操作通常不需要 ID，直接按当前焦点
-                # 如果 AI 给了 ID，我们可以先点一下那个元素聚焦，再按回车
-                if target_id:
+            # === 新增：滚动操作 ===
+            if action == "scroll":
+                if val == "up":
+                    page.evaluate("window.scrollBy(0, -500)")
+                else: # 默认向下滚
+                    page.evaluate("window.scrollBy(0, 500)")
+                print("  📜 滚动页面...")
+                time.sleep(2)
+                
+            # === 键盘操作 ===
+            elif action == "key":
+                if target_id: # 如果给了ID，先聚焦再按键
                     selector = f'[data-agent-id="{target_id}"]'
                     if page.locator(selector).count() > 0:
                          page.locator(selector).first.press(val)
@@ -115,10 +128,10 @@ def execute_task(task, browser_context):
                         page.keyboard.press(val)
                 else:
                     page.keyboard.press(val)
-                    
                 print(f"  ⌨️ 按键: {val}")
-                time.sleep(3) # 等待搜索跳转
+                time.sleep(3) 
                 
+            # === 点击与输入 ===
             elif target_id:
                 selector = f'[data-agent-id="{target_id}"]'
                 if page.locator(selector).count() == 0:
@@ -130,7 +143,6 @@ def execute_task(task, browser_context):
                 if action == "click":
                     loc.click(timeout=ACTION_TIMEOUT)
                 elif action == "type":
-                    # 防呆检查
                     tag_name = loc.evaluate("el => el.tagName.toLowerCase()")
                     if tag_name not in ['input', 'textarea']:
                         print("  ⚠️ 不是输入框，尝试点击...")
@@ -150,7 +162,8 @@ def execute_task(task, browser_context):
 
 def main():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS_MODE)
+        # headless=False 非常重要，你要看着它登录和买东西！
+        browser = p.chromium.launch(headless=False)
         context = browser.new_context()
         results = []
         for task in EXPERIMENT_TASKS:
